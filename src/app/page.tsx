@@ -14,6 +14,8 @@ export default function Home() {
   const [serverDevMock, setServerDevMock] = useState<boolean | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>("");
+  // UI mode: 'question' or 'range'
+  const [mode, setMode] = useState<'question' | 'range'>('question');
   //const {messages, input, handleInputChange, handleSubmit, isLoading} = useChat({maxSteps: 5});
 
   const onChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -41,12 +43,17 @@ export default function Home() {
         content: msg.content,
       }));
 
+      // If in range mode, send the range as the question
+      const body = mode === 'range'
+        ? { question: userMessage, contents, devMock }
+        : { question: userMessage, contents, devMock };
+
       const res = await fetch('/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ question: userMessage, contents, devMock }),
+        body: JSON.stringify(body),
       });
       // Support both plain-text (success) and JSON (error) responses.
       const contentType = res.headers.get?.('content-type') || '';
@@ -162,16 +169,43 @@ export default function Home() {
           </div>
         )}
 
-        {/* Input form */}
+        {/* Input form with mode toggle */}
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+          <div className="flex gap-4 mb-1">
+            <label className="flex items-center gap-1 text-sm">
+              <input
+                type="radio"
+                name="mode"
+                value="question"
+                checked={mode === 'question'}
+                onChange={() => setMode('question')}
+                disabled={loading}
+              />
+              Question
+            </label>
+            <label className="flex items-center gap-1 text-sm">
+              <input
+                type="radio"
+                name="mode"
+                value="range"
+                checked={mode === 'range'}
+                onChange={() => setMode('range')}
+                disabled={loading}
+              />
+              Verse Range
+            </label>
+          </div>
           <textarea
             value={input}
             onChange={onChange}
             rows={3}
-            placeholder="Ask a question about the Bible..."
+            placeholder={mode === 'range' ? 'Enter a Bible verse range, e.g. John 3:16-4:2' : 'Ask a question about the Bible...'}
             disabled={loading}
             className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600 resize-none disabled:bg-gray-100"
           />
+          {mode === 'range' && (
+            <div className="text-xs text-gray-500 mb-1 ml-1">Example: <span className="font-mono">John 3:16-4:2</span> or <span className="font-mono">Genesis 1:1-5</span></div>
+          )}
           <label className="flex items-center gap-2 text-sm text-gray-600">
             <input
               type="checkbox"
@@ -187,7 +221,7 @@ export default function Home() {
             disabled={loading || !input.trim()}
             className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-semibold py-2 px-4 rounded-lg transition duration-200"
           >
-            {loading ? 'Loading...' : 'Ask'}
+            {loading ? (mode === 'range' ? 'Expanding...' : 'Loading...') : (mode === 'range' ? 'Expand Range' : 'Ask')}
           </button>
         </form>
       </div>

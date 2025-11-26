@@ -66,7 +66,6 @@ export async function fetchVerses(references: string[] | string): Promise<Record
 export async function fetchRange(range: string): Promise<Record<string, string | null>> {
   if (!range || typeof range !== 'string') throw new TypeError('range must be a non-empty string');
 
-  // Trim the input
   const input = range.trim();
 
   // Regex for same-chapter ranges: Book Chapter:start-end
@@ -77,19 +76,73 @@ export async function fetchRange(range: string): Promise<Record<string, string |
     const start = Number(sameChapterMatch[3]);
     const end = Number(sameChapterMatch[4]);
     if (Number.isNaN(chapter) || Number.isNaN(start) || Number.isNaN(end) || start > end) {
-      // Invalid numeric range -> return single fetch for the entire input
       const single = await fetchVerse(input);
       return { [input]: single };
     }
-
-    // Build list of individual verse references
     const list: string[] = [];
     for (let v = start; v <= end; v++) list.push(`${book} ${chapter}:${v}`);
     return fetchVerses(list);
   }
 
-  // Cross-chapter range or chapter/book -> fetch as a single passage
-  // Examples: "John 3:16-4:2", "John 3", "John"
+  // Regex for cross-chapter ranges: Book Chapter:Start-Chapter2:End
+  // e.g. "John 3:16-4:2"
+  const crossChapterMatch = input.match(/^([1-3]?\s?[A-Za-z.]+)\s+(\d+):(\d+)-(\d+):(\d+)$/);
+  if (crossChapterMatch) {
+    const book = crossChapterMatch[1].trim();
+    const chapter1 = Number(crossChapterMatch[2]);
+    const verse1 = Number(crossChapterMatch[3]);
+    const chapter2 = Number(crossChapterMatch[4]);
+    const verse2 = Number(crossChapterMatch[5]);
+    if (
+      Number.isNaN(chapter1) || Number.isNaN(verse1) ||
+      Number.isNaN(chapter2) || Number.isNaN(verse2) ||
+      chapter1 > chapter2 || (chapter1 === chapter2 && verse1 > verse2)
+    ) {
+      const single = await fetchVerse(input);
+      return { [input]: single };
+    }
+
+    // Helper to get the number of verses in a chapter
+    async function getChapterLength(book: string, chapter: number): Promise<number> {
+      const ref = `${book} ${chapter}`;
+      if (CACHE[`__chapterlen__${ref}`]) {
+        return Number(CACHE[`__chapterlen__${ref}`]);
+      }
+      try {
+        const res = await fetch(`https://bible-api.com/${encodeURIComponent(ref)}`);
+        if (!res.ok) return 0;
+        const body = await res.json();
+        const verses = Array.isArray(body?.verses) ? body.verses : [];
+        const len = verses.length;
+        if (len > 0) CACHE[`__chapterlen__${ref}`] = String(len);
+        return len;
+      } catch (err) {
+        console.error('bible-api chapter length fetch failed', err);
+        return 0;
+      }
+    }
+
+    const list: string[] = [];
+    // First chapter: from verse1 to end of chapter1
+    const chapter1Len = await getChapterLength(book, chapter1);
+    for (let v = verse1; v <= chapter1Len; v++) {
+      list.push(`${book} ${chapter1}:${v}`);
+    }
+    // Middle chapters (if any)
+    for (let c = chapter1 + 1; c < chapter2; c++) {
+      const clen = await getChapterLength(book, c);
+      for (let v = 1; v <= clen; v++) {
+        list.push(`${book} ${c}:${v}`);
+      }
+    }
+    // Last chapter: from 1 to verse2
+    for (let v = 1; v <= verse2; v++) {
+      list.push(`${book} ${chapter2}:${v}`);
+    }
+    return fetchVerses(list);
+  }
+
+  // Fallback: chapter or book string (e.g. "John 3" or "John")
   const single = await fetchVerse(input);
   return { [input]: single };
 }

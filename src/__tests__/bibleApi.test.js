@@ -70,11 +70,49 @@ describe('bibleApi helpers', () => {
     expect(out['John 3:18']).toBe('v18');
   });
 
-  test('fetchRange falls back for cross-chapter ranges and returns single passage', async () => {
-    global.fetch = jest.fn((url) => Promise.resolve({ ok: true, json: () => Promise.resolve({ text: 'combined' }) }));
+  test('fetchRange expands cross-chapter ranges', async () => {
+    // Mock chapter length fetches and verse fetches
+    global.fetch = jest.fn((url) => {
+      // Normalize URL for easier matching
+      const decoded = decodeURIComponent(url);
+      // Chapter length fetch for John 3
+      if (/John\s+3$/.test(decoded)) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ verses: Array(36).fill(0).map((_, i) => ({ verse: i + 1 })) }) });
+      }
+      // Chapter length fetch for John 4
+      if (/John\s+4$/.test(decoded)) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ verses: Array(54).fill(0).map((_, i) => ({ verse: i + 1 })) }) });
+      }
+      // Verse fetches
+      const verseMatch = decoded.match(/John\s+(\d+):(\d+)/);
+      if (verseMatch) {
+        const ch = verseMatch[1], v = verseMatch[2];
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ text: `v${ch}:${v}` }) });
+      }
+      return Promise.resolve({ ok: false });
+    });
+
+    // John 3:16-4:2 should expand to John 3:16-3:36 and John 4:1-4:2
     const out = await api.fetchRange('John 3:16-4:2');
-    expect(Object.keys(out)).toEqual(['John 3:16-4:2']);
-    expect(out['John 3:16-4:2']).toBe('combined');
+    // Check a few key verses
+    expect(out['John 3:16']).toBe('v3:16');
+    expect(out['John 3:36']).toBe('v3:36');
+    expect(out['John 4:1']).toBe('v4:1');
+    expect(out['John 4:2']).toBe('v4:2');
+    // Check all expected keys are present
+    const keys = Object.keys(out);
+    // John 3:16-3:36
+    for (let v = 16; v <= 36; v++) {
+      expect(keys).toContain(`John 3:${v}`);
+      expect(out[`John 3:${v}`]).toBe(`v3:${v}`);
+    }
+    // John 4:1-4:2
+    for (let v = 1; v <= 2; v++) {
+      expect(keys).toContain(`John 4:${v}`);
+      expect(out[`John 4:${v}`]).toBe(`v4:${v}`);
+    }
+    expect(keys[0]).toBe('John 3:16');
+    expect(keys[keys.length - 1]).toBe('John 4:2');
   });
 
   test('fetchRange returns chapter/book single passage', async () => {
