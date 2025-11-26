@@ -48,6 +48,33 @@ describe('chat route verse retrieval', () => {
     createMock = jest.fn(async (args) => ({ text: 'mock ai reply' }));
   });
 
+  test('POST returns 400 for missing or invalid question', async () => {
+    const req = { json: async () => ({}) };
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.success).toBe(false);
+    expect(String(json.error)).toMatch(/Invalid or missing `question`/);
+  });
+
+  test('POST returns 400 when contents is not an array', async () => {
+    const req = { json: async () => ({ question: 'Hi', contents: 'nope' }) };
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.success).toBe(false);
+    expect(String(json.error)).toMatch(/`contents` must be an array/);
+  });
+
+  test('POST returns 400 when contents contains invalid items', async () => {
+    const req = { json: async () => ({ question: 'Hi', contents: [{ role: 'invalid', content: 'x' }] }) };
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.success).toBe(false);
+    expect(String(json.error)).toMatch(/Invalid item in `contents` array/);
+  });
+
   test('dev mock mode returns canned response and fetches verse when available', async () => {
     process.env.DEV_MOCK = 'true';
 
@@ -133,7 +160,15 @@ describe('chat route verse retrieval', () => {
     const callArgs = createMock.mock.calls[0][0];
     // history should be present and a content with the verse text should be among parts
     const history = callArgs.history || callArgs.contents || [];
-    const joinedParts = history.map((h) => h.parts).join('\n');
+    const joinedParts = history
+      .map((h) => {
+        if (typeof h.parts === 'string') return h.parts;
+        if (Array.isArray(h.parts)) {
+          return h.parts.map((p) => (typeof p === 'string' ? p : (p?.text || ''))).join(' ');
+        }
+        return String(h.parts);
+      })
+      .join('\n');
     expect(joinedParts).toMatch(/John 3:16/);
     expect(joinedParts).toMatch(/For God so loved the world/);
   });
@@ -158,7 +193,15 @@ describe('chat route verse retrieval', () => {
     expect(createMock).toHaveBeenCalled();
     const callArgs = createMock.mock.calls[0][0];
     const history = callArgs.history || callArgs.contents || [];
-    const joined = history.map((h) => h.parts).join('\n');
+    const joined = history
+      .map((h) => {
+        if (typeof h.parts === 'string') return h.parts;
+        if (Array.isArray(h.parts)) {
+          return h.parts.map((p) => (typeof p === 'string' ? p : (p?.text || ''))).join(' ');
+        }
+        return String(h.parts);
+      })
+      .join('\n');
     expect(joined).toMatch(/Reference John 3:16: v16/);
     expect(joined).toMatch(/Reference John 3:17: v17/);
     expect(joined).toMatch(/Reference John 3:18: v18/);

@@ -17,11 +17,47 @@ When answering:
 - Provide multiple perspectives when applicable (e.g., different theological viewpoints)`;
 
 export async function POST(request: Request) {
-    // Read request body once
-    const body = await request.json().catch(() => ({}));
-    const question = body.question;
-    const contents = body.contents ?? [];
-    const clientDevMock = body.devMock === true;
+    // Read request body once (unknown shape) and validate/normalize
+    const rawBody = await request.json().catch(() => ({} as unknown));
+
+    // Runtime types and helpers
+    type ChatContentItem = { role: 'user' | 'assistant' | 'system' | 'model'; content: string };
+    type ChatRequestBody = { question: string; contents?: ChatContentItem[]; devMock?: boolean };
+
+    function isChatContentItem(obj: unknown): obj is ChatContentItem {
+        if (!obj || typeof obj !== 'object') return false;
+        const r = (obj as Record<string, unknown>).role;
+        const c = (obj as Record<string, unknown>).content;
+        return (r === 'user' || r === 'assistant' || r === 'system' || r === 'model') && typeof c === 'string';
+    }
+
+    function parseRequest(raw: unknown): { error?: string; value?: ChatRequestBody } {
+        if (!raw || typeof raw !== 'object') return { error: 'Invalid request body' };
+        const rb = raw as Record<string, unknown>;
+        const q = rb.question;
+        if (typeof q !== 'string' || !q.trim()) return { error: 'Invalid or missing `question` field' };
+
+        const rawContents = rb.contents;
+        let contents: ChatContentItem[] | undefined = undefined;
+        if (rawContents !== undefined) {
+            if (!Array.isArray(rawContents)) return { error: '`contents` must be an array when provided' };
+            const parsed: ChatContentItem[] = [];
+            for (const item of rawContents) {
+                if (!isChatContentItem(item)) return { error: 'Invalid item in `contents` array' };
+                parsed.push(item as ChatContentItem);
+            }
+            contents = parsed;
+        }
+
+        const devMock = rb.devMock === true;
+        return { value: { question: q.trim(), contents, devMock } };
+    }
+
+    const parsed = parseRequest(rawBody);
+    if (parsed.error) {
+        return new Response(JSON.stringify({ success: false, error: parsed.error }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    }
+    const { question, contents = [], devMock: clientDevMock = false } = parsed.value as ChatRequestBody;
 
     // DEV mock mode: useful for local development when real keys or external services are unavailable.
     // Conditions that enable mock:
@@ -127,12 +163,18 @@ export async function POST(request: Request) {
 
     try {
         // Use the chats API (history) to keep behavior predictable and compatible
+        // Convert our simple `parts` strings into the SDK's expected array-of-parts format
+        const sdkHistory = messages.map((m) => ({ role: m.role, parts: [{ text: String(m.parts) }] }));
         const response = await ai.chats.create({
             model: 'gemini-2.5-flash',
             config: {
                 maxOutputTokens: 300,
             },
-            history: messages,
+            // `messages` uses a compact shape for our internal flow. The SDK expects a more complex
+            // `parts` structure. Cast to a compatible shape for the SDK without using `any`.
+            // The internal `parts` we provide are strings — the SDK accepts arrays of parts and
+            // may be more structured, but a simple array-of-strings is accepted at runtime.
+            history: sdkHistory,
         });
 
         // Normalize the model response so the client only receives a single `text` string.
