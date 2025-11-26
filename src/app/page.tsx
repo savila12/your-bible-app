@@ -7,6 +7,23 @@ interface Message {
   content: string;
 }
 
+// Payload sent to the /chat API
+interface ChatContentItem {
+  role: 'user' | 'assistant' | 'system' | 'model';
+  content: string;
+}
+
+interface ChatRequestBody {
+  question: string;
+  contents?: ChatContentItem[];
+  devMock?: boolean;
+}
+
+// Server can return either plain text (success) or JSON for error shape
+type ChatJsonSuccess = { success: true; data?: { text?: string } };
+type ChatJsonError = { success: false; error?: string };
+type ChatJsonResponse = ChatJsonSuccess | ChatJsonError;
+
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState<string>("");
@@ -23,7 +40,7 @@ export default function Home() {
     setError(""); // Clear error when user starts typing
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!input.trim()) return;
 
@@ -38,15 +55,13 @@ export default function Home() {
       setMessages(updatedMessages);
 
       // Convert messages to API format (exclude last user message as it's in question param)
-      const contents = updatedMessages.slice(0, -1).map((msg) => ({
+      const contents: ChatContentItem[] = updatedMessages.slice(0, -1).map((msg) => ({
         role: msg.role,
         content: msg.content,
       }));
 
-      // If in range mode, send the range as the question
-      const body = mode === 'range'
-        ? { question: userMessage, contents, devMock }
-        : { question: userMessage, contents, devMock };
+      // Build the body with explicit type for safer code
+      const body: ChatRequestBody = { question: userMessage, contents, devMock };
 
       const res = await fetch('/chat', {
         method: 'POST',
@@ -56,14 +71,15 @@ export default function Home() {
         body: JSON.stringify(body),
       });
       // Support both plain-text (success) and JSON (error) responses.
-      const contentType = res.headers.get?.('content-type') || '';
+      const contentType = (res.headers.get('content-type') ?? '').toLowerCase();
       let responseText = '';
       if (res.ok && contentType.includes('text/plain')) {
         responseText = await res.text();
       } else if (contentType.includes('application/json')) {
-        const json = await res.json();
+        const json = (await res.json()) as ChatJsonResponse;
         if (!json.success) {
-          throw new Error(json.error || 'Failed to get response');
+          // bubble up error text if provided
+          throw new Error(json.error ?? 'Failed to get response');
         }
         // In case a JSON success body is returned (backwards compatibility), read the text field
         responseText = json?.data?.text ?? '';
@@ -71,12 +87,12 @@ export default function Home() {
         // Fallback to text for unknown content types (be permissive)
         responseText = await res.text();
       }
-      setMessages((prev) => [...prev, { role: 'assistant', content: responseText }]);
+      setMessages((prev: Message[]) => [...prev, { role: 'assistant', content: responseText }]);
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'An error occurred';
       setError(errorMsg);
       // Remove the last user message on error
-      setMessages((prev) => prev.slice(0, -1));
+      setMessages((prev: Message[]) => prev.slice(0, -1));
     } finally {
       setLoading(false);
     }

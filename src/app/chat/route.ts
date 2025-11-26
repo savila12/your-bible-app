@@ -1,5 +1,6 @@
 import {GoogleGenAI} from '@google/genai'
 import { fetchVerse, fetchRange, extractFirstVerseReference } from '../../lib/bibleApi';
+import { retrieveRagContext } from '../../lib/rag';
 
 const apiKey = process.env.GEMINI_AI_KEY || process.env.GEMINI_API_KEY;
 // If the key is not set, create the client but we'll guard and return a clear error.
@@ -67,6 +68,17 @@ export async function POST(request: Request) {
             role: msg.role === 'user' ? 'user' : 'model',
             parts: msg.content,
         }));
+
+    // (message insertion and range/verse expansion already handled above)
+
+    // Retrieve RAG context from Supabase for the question/range and add as system messages
+    const ragSnippets = await retrieveRagContext(question);
+    if (Array.isArray(ragSnippets) && ragSnippets.length > 0) {
+        messages.push(...ragSnippets.map((snippet: string) => ({
+            role: 'system',
+            parts: `Related context: ${snippet}`
+        })));
+    }
 
     // If the user referenced a verse (e.g. "John 3:16"), try to fetch it and insert into the history
     // Try to detect a range (e.g. "John 3:16-18" or "John 3:16-4:2") first, otherwise fallback
