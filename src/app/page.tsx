@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect } from "react";
-//import { useChat } from 'ai/react';
+import { useChat } from '@ai-sdk/react';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -25,34 +25,47 @@ type ChatJsonError = { success: false; error?: string };
 type ChatJsonResponse = ChatJsonSuccess | ChatJsonError;
 
 export default function Home() {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState<string>("");
+  const [chatMessages, setChatMessages] = useState<Message[]>([]);
+  const [textInput, setTextInput] = useState<string>("");
   const [devMock, setDevMock] = useState<boolean>(false);
   const [serverDevMock, setServerDevMock] = useState<boolean | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>("");
   // UI mode: 'question' or 'range'
   const [mode, setMode] = useState<'question' | 'range'>('question');
-  //const {messages, input, handleInputChange, handleSubmit, isLoading} = useChat({maxSteps: 5});
+  const {messages} = useChat({
+    messages: [
+      { 
+        id: 'welcome-message',
+        role: 'assistant',
+        parts: [
+          { 
+            type: 'text',
+            text: 'Shalom! I am your Bible AI Scholar. I can look up verses directly from Scripture or search for theological commentary. How can I help you today?'
+        },
+      ],
+      },
+    ]
+  });
 
   const onChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setInput(e.target.value);
+    setTextInput(e.target.value);
     setError(""); // Clear error when user starts typing
   };
 
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleUserSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!input.trim()) return;
+    if (!textInput.trim()) return;
 
     setLoading(true);
     setError("");
-    const userMessage = input;
-    setInput("");
+    const userMessage = textInput;
+    setTextInput("");
 
     try {
       // Add user message to chat
-      const updatedMessages = [...messages, { role: 'user' as const, content: userMessage }];
-      setMessages(updatedMessages);
+      const updatedMessages = [...chatMessages, { role: 'user' as const, content: userMessage }];
+      setChatMessages(updatedMessages);
 
       // Convert messages to API format (exclude last user message as it's in question param)
       const contents: ChatContentItem[] = updatedMessages.slice(0, -1).map((msg) => ({
@@ -87,12 +100,12 @@ export default function Home() {
         // Fallback to text for unknown content types (be permissive)
         responseText = await res.text();
       }
-      setMessages((prev: Message[]) => [...prev, { role: 'assistant', content: responseText }]);
+      setChatMessages((prev: Message[]) => [...prev, { role: 'assistant', content: responseText }]);
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'An error occurred';
       setError(errorMsg);
       // Remove the last user message on error
-      setMessages((prev: Message[]) => prev.slice(0, -1));
+      setChatMessages((prev: Message[]) => prev.slice(0, -1));
     } finally {
       setLoading(false);
     }
@@ -147,7 +160,7 @@ export default function Home() {
 
         {/* Chat messages */}
         <div className="bg-gray-100 rounded-lg p-4 mb-6 h-96 overflow-y-auto flex flex-col space-y-4">
-          {messages.length === 0 ? (
+          {messages.length === 1 ? (
             <div className="flex items-center justify-center h-full text-gray-400">
               <p>Start a conversation by asking a biblical question</p>
             </div>
@@ -164,7 +177,7 @@ export default function Home() {
                       : 'bg-gray-300 text-gray-900'
                   }`}
                 >
-                  <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                  <p className="text-sm whitespace-pre-wrap">{msg.parts[0].text}</p>
                 </div>
               </div>
             ))
@@ -186,7 +199,7 @@ export default function Home() {
         )}
 
         {/* Input form with mode toggle */}
-        <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+        <form onSubmit={handleUserSubmit} className="flex flex-col gap-3">
           <div className="flex gap-4 mb-1">
             <label className="flex items-center gap-1 text-sm">
               <input
@@ -212,7 +225,7 @@ export default function Home() {
             </label>
           </div>
           <textarea
-            value={input}
+            value={textInput}
             onChange={onChange}
             rows={3}
             placeholder={mode === 'range' ? 'Enter a Bible verse range, e.g. John 3:16-4:2' : 'Ask a question about the Bible...'}
@@ -234,7 +247,7 @@ export default function Home() {
           </label>
           <button
             type="submit"
-            disabled={loading || !input.trim()}
+            disabled={loading || !textInput.trim()}
             className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-semibold py-2 px-4 rounded-lg transition duration-200"
           >
             {loading ? (mode === 'range' ? 'Expanding...' : 'Loading...') : (mode === 'range' ? 'Expand Range' : 'Ask')}
