@@ -1,8 +1,9 @@
 import {GoogleGenAI} from '@google/genai'
 import { fetchVerse, fetchRange, extractFirstVerseReference } from '../../lib/bibleApi';
 import { retrieveRagContext } from '../../lib/rag';
+import { searchWeb } from '../../lib/webSearch';
 
-const apiKey = process.env.GEMINI_AI_KEY || process.env.GEMINI_API_KEY;
+const apiKey = process.env.GEMINI_AI_KEY || process.env.GEMINI_API_KEY || '';
 // If the key is not set, create the client but we'll guard and return a clear error.
 const ai = new GoogleGenAI({ apiKey: apiKey })
 
@@ -50,7 +51,7 @@ export async function POST(request: Request) {
         }
 
         const devMock = rb.devMock === true;
-        return { value: { question: q.trim(), contents, devMock } };
+        return { value: { question: q.trim(), contents, devMock }  as ChatRequestBody };
     }
 
     const parsed = parseRequest(rawBody);
@@ -114,6 +115,34 @@ export async function POST(request: Request) {
             role: 'system',
             parts: `Related context: ${snippet}`
         })));
+    } else {
+        // If RAG returned nothing, try web search as a fallback and surface those snippets
+        try {
+            const web = await searchWeb(question, 3);
+            if (Array.isArray(web) && web.length > 0) {
+                // Insert a short guidance so the model knows these are external web snippets
+                messages.push({ role: 'system', parts: 'Note: the following short web-sourced commentary snippets are provided as reference — you may use them to inform your answer and should cite the source where appropriate.' });
+
+                // Format each web result as a short, attributed snippet (numbered)
+                const maxLen = 200;
+                for (let i = 0; i < web.length; i++) {
+                    const raw = String(web[i] ?? '');
+                    // attempt to extract a URL if present (common in search results)
+                    const urlMatch = raw.match(/(https?:\/\/\S+)/);
+                    const url = urlMatch ? urlMatch[0] : null;
+
+                    // prefer to show a short snippet (avoid very long insertions)
+                    const textOnly = url ? raw.replace(url, '').trim() : raw;
+                    const short = textOnly.length > maxLen ? textOnly.substring(0, maxLen - 1).trim() + '…' : textOnly;
+
+                    const formatted = url ? `Web context [${i + 1}]: ${short} (source: ${url})` : `Web context [${i + 1}]: ${short}`;
+                    messages.push({ role: 'system', parts: formatted });
+                }
+            }
+        } catch (err) {
+            // Non-fatal — continue without web context
+            console.warn('webSearch fallback failed', err);
+        }
     }
 
     // If the user referenced a verse (e.g. "John 3:16"), try to fetch it and insert into the history

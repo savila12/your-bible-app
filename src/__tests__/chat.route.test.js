@@ -278,4 +278,42 @@ describe('chat route verse retrieval', () => {
 
     process.env.NODE_ENV = originalNodeEnv;
   });
+
+  test('when RAG empty, route uses web search fallback and includes web snippets in history', async () => {
+    // reset modules and set up new mocks so we can control the imports used by the route
+    jest.resetModules();
+
+    // Mock AI client again for the re-required module
+    const localCreateMock = jest.fn(async (args) => ({ text: 'web reply' }));
+    jest.doMock('@google/genai', () => ({ GoogleGenAI: jest.fn(() => ({ chats: { create: (...a) => localCreateMock(...a) } })) }));
+
+    // Fake RAG to return no results
+    jest.doMock('../../src/lib/rag', () => ({ retrieveRagContext: async () => [] }));
+    // Mock web search to return some commentary
+    const webResults = ['Web: Commentary A', 'Web: Commentary B'];
+    jest.doMock('../../src/lib/webSearch', () => ({ searchWeb: async () => webResults }));
+
+    // Re-require the freshly mocked route module
+    const route = require('../../src/app/chat/route');
+    const { POST } = route;
+
+    // Send a question that doesn't trigger verse fetching or DEV_MOCK
+    const req = { json: async () => ({ question: 'Tell me about love' }) };
+    const res = await POST(req);
+    const text = await res.text();
+
+    expect(text).toBe('web reply');
+    // Verify that the AI client was called and that the web snippets are in the history
+    expect(localCreateMock).toHaveBeenCalled();
+    const callArgs = localCreateMock.mock.calls[0][0];
+    const history = callArgs.history || callArgs.contents || [];
+    const joined = history
+      .map((h) => (Array.isArray(h.parts) ? h.parts.map((p) => (typeof p === 'string' ? p : p?.text || '')).join(' ') : String(h.parts)))
+      .join('\n');
+
+    expect(joined).toMatch(/Web context \[1\]/);
+    expect(joined).toMatch(/Web: Commentary A/);
+    expect(joined).toMatch(/Web context \[2\]/);
+    expect(joined).toMatch(/Web: Commentary B/);
+  });
 });

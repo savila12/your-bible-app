@@ -1,6 +1,7 @@
 // src/lib/rag.ts
 import { supabase } from './supabaseClient';
 import { querySimilarDocuments } from './supabaseRag';
+import { searchWeb } from './webSearch';
 
 /**
  * Retrieve relevant context from Supabase for a given query (question or verse range).
@@ -41,7 +42,13 @@ export async function retrieveRagContext(query: string): Promise<string[]> {
 
     if (error) {
       console.error('Supabase RAG error:', error);
-      return [];
+      // Try web search as a fallback when Supabase returns an error
+      try {
+        const web = await searchWeb(query, 3);
+        return web;
+      } catch {
+        return [];
+      }
     }
 
     // Return up to 3 relevant non-empty snippets
@@ -50,10 +57,24 @@ export async function retrieveRagContext(query: string): Promise<string[]> {
       .filter((c): c is string => typeof c === 'string' && c.trim().length > 0)
       .slice(0, 3);
 
-    return snippets;
+    if (snippets.length > 0) return snippets;
+
+    // No local snippets found — fall back to webSearch for external commentary
+    try {
+      const web = await searchWeb(query, 3);
+      return web;
+    } catch {
+      return [];
+    }
   } catch (err) {
     // If any exception occurs (e.g. network, client not installed), log and return empty results
     console.error('Supabase RAG fetch failed:', err);
-    return [];
+    // If Supabase fails, try the web search fallback for external commentary
+    try {
+      const web = await searchWeb(query, 3);
+      return web;
+    } catch {
+      return [];
+    }
   }
 }
