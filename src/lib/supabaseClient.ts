@@ -1,3 +1,5 @@
+import { createClient } from '@supabase/supabase-js';
+
 // src/lib/supabaseClient.ts
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
@@ -19,9 +21,6 @@ let supabase: any = makeStubClient();
 
 try {
   // attempt to load the real client if available and env vars are set
-  // use require to avoid top-level ESM import failures in tests
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { createClient } = require('@supabase/supabase-js');
   if (supabaseUrl && supabaseKey) {
     supabase = createClient(supabaseUrl, supabaseKey);
   }
